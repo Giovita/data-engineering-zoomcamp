@@ -7,8 +7,9 @@ import pyarrow.parquet as pq
 from airflow import DAG
 from airflow.operators.bash import BashOperator
 from airflow.operators.python import PythonOperator
-from airflow.providers.google.cloud.operators.bigquery import \
-    BigQueryCreateExternalTableOperator
+from airflow.providers.google.cloud.operators.bigquery import (
+    BigQueryCreateExternalTableOperator,
+)
 from google.cloud import storage
 
 PROJECT_ID = os.environ.get("GCP_PROJECT_ID")
@@ -17,28 +18,38 @@ BIGQUERY_DATASET = os.environ.get("BIGQUERY_DATASET", "trips_data_all")
 
 
 # source file
-DATASET_URL = "https://s3.amazonaws.com/nyc-tlc/trip+data/"  # base url of files, usefull for yellow taxi and fh
-file_prefix = "yellow_tripdata_"  # + YYYY-MM.CSV
+DATASET_URL = "https://s3.amazonaws.com/nyc-tlc/trip+data/"
+file_prefix = "fhv_tripdata_"
 dataset_file = file_prefix + "{{execution_date.strftime('%Y-%m')}}" + ".csv"
 file_url = DATASET_URL + dataset_file
 
 # local storage
 path_to_local_home = os.environ.get("AIRFLOW_HOME", "/opt/airflow/")
-parquet_file = dataset_file.replace(".csv", ".parquet")  # Should be ingested via XCOM
+parquet_file = dataset_file.replace(".csv", ".parquet")
+src_pq_file = path_to_local_home + parquet_file
 
 
-def format_to_parquet(**context):
-    ti = context["ti"]
-    src_file = ti.xcom_pull(task_ids="download_dataset")
+# def format_to_parquet(**context):
+#     ti = context["ti"]
+#     src_file = ti.xcom_pull(task_ids="download_dataset")
+#     if not src_file.endswith(".csv"):
+#         logging.error("Can only accept source files in CSV format, for the moment")
+#         return
+#     table = pv.read_csv(src_file)
+#     pq.write_table(table, src_file.replace(".csv", ".parquet"))
+#     ti.xcom_push(key="pq_file", value=src_file.replace(".csv", ".parquet"))
+
+
+def format_to_parquet(src_file):
+    # src_file = ti.xcom_pull(task_ids="download_dataset")
     if not src_file.endswith(".csv"):
         logging.error("Can only accept source files in CSV format, for the moment")
         return
     table = pv.read_csv(src_file)
     pq.write_table(table, src_file.replace(".csv", ".parquet"))
-    ti.xcom_push(key="pq_file", value=src_file.replace(".csv", ".parquet"))
 
 
-def upload_to_gcs(bucket, object_name, **context):
+def upload_to_gcs(bucket, object_name, local_file):
     """
     Ref: https://cloud.google.com/storage/docs/uploading-objects#storage-upload-object-python
     :param bucket: GCS bucket name
@@ -53,9 +64,6 @@ def upload_to_gcs(bucket, object_name, **context):
     # End of Workaround
 
     # get File name via XCOM  for training purposes (can be done with global `file_url` variable)
-    ti = context["ti"]
-    local_file = ti.xcom_pull(task_ids="format_to_parquet", key="pq_file")
-
     client = storage.Client()
     bucket = client.bucket(bucket)
 
@@ -73,7 +81,7 @@ default_args = {
 # Must run at month over with data of the previous month. So on 01-Feb we push data from 01-31 Jan
 # DAGs `catch up` if there is any period
 with DAG(
-    dag_id="data_ingestion_gcs_yellow-taxi_monthly-dag",
+    dag_id="fhv_monthly_data",
     start_date=datetime(
         2019, 1, 1
     ),  # Start date, first run would happen at 2019-2-1 @6am with data of 2019-1-1
@@ -81,23 +89,23 @@ with DAG(
     schedule_interval="0 6 2 * *",  # Accepts cronjob syntax (from crontab.guru)
     default_args=default_args,
     catchup=True,
-    max_active_runs=1,
+    max_active_runs=3,
     tags=["dtc-de"],
 ) as dag:
 
     download_dataset_task = BashOperator(
         task_id="download_dataset",
-        do_xcom_push=True,
-        bash_command=f"curl -sS {file_url} > {path_to_local_home}/{dataset_file} | echo {path_to_local_home}/{dataset_file}",
+        # do_xcom_push=True,
+        bash_command=f"curl -sSLf {file_url} > {path_to_local_home}/{dataset_file}",
     )
 
     format_to_parquet_task = PythonOperator(
         task_id="format_to_parquet",
         python_callable=format_to_parquet,
-        # op_kwargs={
-        #     "src_file": f"{path_to_local_home}/{TaskInstance.xcom_pull(task_ids='download_dataset_task'}",
-        # },
-        provide_context=True,
+        op_kwargs={
+            "src_file": f"{path_to_local_home}/{dataset_file}",
+        },
+        # provide_context=True,
     )
 
     # TODO: Homework - research and try XCOM to communicate output values between 2 tasks/operators
@@ -109,33 +117,18 @@ with DAG(
             "object_name": f"raw/{parquet_file}",
             "local_file": f"{path_to_local_home}/{parquet_file}",
         },
-        provide_context=True,
-    )
-
-    bigquery_external_table_task = BigQueryCreateExternalTableOperator(
-        task_id="bigquery_external_table_task",
-        table_resource={
-            "tableReference": {
-                "projectId": PROJECT_ID,
-                "datasetId": BIGQUERY_DATASET,
-                "tableId": "external_table",
-            },
-            "externalDataConfiguration": {
-                "sourceFormat": "PARQUET",
-                "sourceUris": [f"gs://{BUCKET}/raw/{parquet_file}"],
-            },
-        },
+        # provide_context=True,
     )
 
     cleanup_files = BashOperator(
         task_id="cleanup_container",
         bash_command=f"rm {path_to_local_home}/{dataset_file} {path_to_local_home}/{parquet_file}",
+        trigger_rule="all_done",
     )
 
     (
         download_dataset_task
         >> format_to_parquet_task
         >> local_to_gcs_task
-        >> bigquery_external_table_task
         >> cleanup_files
     )
