@@ -6,7 +6,9 @@ import pyarrow.parquet as pq
 from airflow import DAG
 from airflow.operators.bash import BashOperator
 from airflow.operators.python import PythonOperator
-from airflow.providers.google.cloud.operators.bigquery import BigQueryCreateExternalTableOperator
+from airflow.providers.google.cloud.operators.bigquery import (
+    BigQueryCreateExternalTableOperator,
+)
 from airflow.utils.dates import days_ago
 from google.cloud import storage
 
@@ -63,12 +65,13 @@ with DAG(
     schedule_interval="@daily",
     default_args=default_args,
     catchup=False,
-    max_active_runs=1,
+    max_active_runs=3,
     tags=["dtc-de"],
 ) as dag:
 
     download_dataset_task = BashOperator(
-        task_id="download_dataset_task", bash_command=f"curl -sS {dataset_url} > {path_to_local_home}/{dataset_file}"
+        task_id="download_dataset_task",
+        bash_command=f"curl -sS {dataset_url} > {path_to_local_home}/{dataset_file}",
     )
 
     format_to_parquet_task = PythonOperator(
@@ -105,4 +108,9 @@ with DAG(
         },
     )
 
-    download_dataset_task >> format_to_parquet_task >> local_to_gcs_task >> bigquery_external_table_task
+    (
+        download_dataset_task
+        >> format_to_parquet_task
+        >> local_to_gcs_task
+        >> bigquery_external_table_task
+    )

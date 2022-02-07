@@ -7,8 +7,9 @@ import pyarrow.parquet as pq
 from airflow import DAG
 from airflow.operators.bash import BashOperator
 from airflow.operators.python import PythonOperator
-from airflow.providers.google.cloud.operators.bigquery import \
-    BigQueryCreateExternalTableOperator
+from airflow.providers.google.cloud.operators.bigquery import (
+    BigQueryCreateExternalTableOperator,
+)
 from google.cloud import storage
 
 PROJECT_ID = os.environ.get("GCP_PROJECT_ID")
@@ -81,7 +82,7 @@ with DAG(
     schedule_interval="0 6 2 * *",  # Accepts cronjob syntax (from crontab.guru)
     default_args=default_args,
     catchup=True,
-    max_active_runs=1,
+    max_active_runs=3,
     tags=["dtc-de"],
 ) as dag:
 
