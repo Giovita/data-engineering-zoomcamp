@@ -1,7 +1,7 @@
 ## Homework
 [Form](https://forms.gle/ytzVYUh2RptgkvF79)  
 We will use all the knowledge learned in this week. Please answer your questions via form above.  
-**Deadline** for the homework is 7th Feb 2022 17:00 CET.
+**Deadline** for the homework is 14th Feb 2022 17:00 CET.
 
 ### Question 1: 
 **What is count for fhv vehicles data for year 2019**  
@@ -26,7 +26,7 @@ actual data processed can be found after the query is executed.
 ### Question 5: 
 **What will be the best partitioning or clustering strategy when filtering on dispatching_base_num and SR_Flag**  
 Review partitioning and clustering video. 
-Clustering cannot be created on all data types.
+Partitioning cannot be created on all data types.
 
 ### Question 6: 
 **What improvements can be seen by partitioning and clustering for data size less than 1 GB**  
